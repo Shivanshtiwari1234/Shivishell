@@ -3,9 +3,8 @@ echo Compiling...
 
 del shivishell.exe 2>nul
 
-set PATH=C:\MinGW\bin;%PATH%
+gcc main.c -o shivishell.exe -static -static-libgcc -static-libstdc++
 
-gcc main.c -o shivishell.exe
 if %errorlevel% neq 0 (
     echo Compilation failed!
     pause
