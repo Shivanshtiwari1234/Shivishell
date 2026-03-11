@@ -11,14 +11,13 @@ Shivishell is a compact, cross-platform C shell with a fast line editor, simple 
 - Commands are resolved only from a `commands` directory located next to the executable.
 
 **Build**
-Windows:
-```bat
-build.bat
-```
-
-Linux/macOS (uses `cc`, which maps to `gcc` or `clang`):
+All platforms (Node.js required):
 ```bash
-./build.sh
+node build.js
+```
+Or:
+```bash
+npm run build
 ```
 
 Makefile (Linux/macOS):
@@ -27,14 +26,13 @@ make
 ```
 
 **Tests**
-Windows:
-```bat
-test.bat
-```
-
-Linux/macOS:
+All platforms (Node.js required):
 ```bash
-./test.sh
+node test.js
+```
+Or:
+```bash
+npm test
 ```
 
 Makefile:

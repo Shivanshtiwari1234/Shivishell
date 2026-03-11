@@ -1,0 +1,10 @@
+{
+  "name": "shivishell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A compact, cross-platform C shell.",
+  "scripts": {
+    "build": "node build.js",
+    "test": "node test.js"
+  }
+}

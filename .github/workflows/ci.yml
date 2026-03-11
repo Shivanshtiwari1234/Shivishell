@@ -16,22 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        run: build.bat
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
-      - name: Build (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: |
-          chmod +x build.sh
-          ./build.sh
+      - name: Build
+        run: node build.js
 
-      - name: Tests (Windows)
-        if: runner.os == 'Windows'
-        run: test.bat
-
-      - name: Tests (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: |
-          chmod +x test.sh
-          ./test.sh
+      - name: Tests
+        run: node test.js
