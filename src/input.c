@@ -15,15 +15,18 @@
   static HANDLE g_hIn = NULL, g_hOut = NULL;
   static DWORD g_oldModeIn = 0, g_oldModeOut = 0;
   static CONSOLE_CURSOR_INFO g_oldCursorInfo;
+  #define PROMPT_PATH_MAX MAX_PATH
 #else
   #include <unistd.h>
   #include <termios.h>
   #include <limits.h>
   static struct termios g_oldtio;
+  #define PROMPT_PATH_MAX PATH_MAX
 #endif
 
 static char linebuf[MAX_INPUT];
 static int inited = 0;
+static int use_stdio = 0;
 
 /* Read 1 byte from stdin (cross-platform) */
 static int read_stdin_byte(char *out) {
@@ -45,10 +48,18 @@ int input_init(void) {
 #if defined(_WIN32) || defined(_WIN64)
     g_hIn = GetStdHandle(STD_INPUT_HANDLE);
     g_hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (g_hIn == INVALID_HANDLE_VALUE || g_hOut == INVALID_HANDLE_VALUE) return -1;
+    if (g_hIn == INVALID_HANDLE_VALUE || g_hOut == INVALID_HANDLE_VALUE) {
+        use_stdio = 1;
+        inited = 1;
+        return 0;
+    }
 
     DWORD mIn = 0, mOut = 0;
-    if (!GetConsoleMode(g_hIn, &mIn) || !GetConsoleMode(g_hOut, &mOut)) return -1;
+    if (!GetConsoleMode(g_hIn, &mIn) || !GetConsoleMode(g_hOut, &mOut)) {
+        use_stdio = 1;
+        inited = 1;
+        return 0;
+    }
 
     g_oldModeIn  = mIn;
     g_oldModeOut = mOut;
@@ -57,9 +68,9 @@ int input_init(void) {
     mOut |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
     SetConsoleMode(g_hOut, mOut);
 
-    /* Disable cooked mode and echo, but keep processed input */
-    mIn &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
-    mIn |=  ENABLE_PROCESSED_INPUT | ENABLE_WINDOW_INPUT | ENABLE_VIRTUAL_TERMINAL_INPUT;
+    /* Disable cooked mode, echo, and processed input so we handle Ctrl-C */
+    mIn &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
+    mIn |=  ENABLE_WINDOW_INPUT | ENABLE_VIRTUAL_TERMINAL_INPUT;
     SetConsoleMode(g_hIn, mIn);
 
     /* Hide cursor */
@@ -70,7 +81,11 @@ int input_init(void) {
     }
 #else
     struct termios t;
-    if (tcgetattr(STDIN_FILENO, &g_oldtio) < 0) return -1;
+    if (tcgetattr(STDIN_FILENO, &g_oldtio) < 0) {
+        use_stdio = 1;
+        inited = 1;
+        return 0;
+    }
 
     t = g_oldtio;
     t.c_lflag &= ~(ICANON | ECHO | IEXTEN);
@@ -90,6 +105,10 @@ int input_init(void) {
 /* Restore original terminal mode */
 void input_restore(void) {
     if (!inited) return;
+    if (use_stdio) {
+        inited = 0;
+        return;
+    }
 
 #if defined(_WIN32) || defined(_WIN64)
     SetConsoleMode(g_hIn,  g_oldModeIn);
@@ -104,7 +123,7 @@ void input_restore(void) {
 }
 
 /* Redraw prompt + buffer */
-static void redraw_line(const char *prompt, char *buf, int len, int cursor) {
+static void redraw_line(const char *prompt, int prompt_len, char *buf, int len, int cursor) {
     fputs("\r", stdout);
     fputs(prompt, stdout);
 
@@ -112,7 +131,6 @@ static void redraw_line(const char *prompt, char *buf, int len, int cursor) {
 
     fputs("\x1b[K", stdout); /* clear right side */
 
-    int prompt_len = (int)strlen(prompt);
     int pos = prompt_len + cursor;
 
     char esc[64];
@@ -120,6 +138,66 @@ static void redraw_line(const char *prompt, char *buf, int len, int cursor) {
     fputs(esc, stdout);
 
     fflush(stdout);
+}
+
+static void to_forward_slashes(char *s) {
+    for (; *s; ++s) {
+        if (*s == '\\') *s = '/';
+    }
+}
+
+static void build_display_cwd(char *out, size_t outlen) {
+    if (!out || outlen == 0) return;
+    out[0] = '\0';
+
+#if defined(_WIN32) || defined(_WIN64)
+    char cwd[MAX_PATH];
+    if (!GetCurrentDirectoryA(MAX_PATH, cwd)) { strncpy(out, "?", outlen - 1); out[outlen - 1] = '\0'; return; }
+
+    const char *home = getenv("USERPROFILE");
+    if (!home || !*home) home = getenv("HOME");
+    if (home && *home) {
+        size_t hlen = strlen(home);
+        if (_strnicmp(cwd, home, hlen) == 0) {
+            const char *rest = cwd + hlen;
+            if (!*rest) {
+                strncpy(out, "~", outlen - 1);
+                out[outlen - 1] = '\0';
+                return;
+            }
+            if (*rest == '\\' || *rest == '/') rest++;
+            snprintf(out, outlen, "~/%s", rest);
+            to_forward_slashes(out);
+            return;
+        }
+    }
+
+    strncpy(out, cwd, outlen - 1);
+    out[outlen - 1] = '\0';
+    to_forward_slashes(out);
+#else
+    char cwd[PATH_MAX];
+    if (!getcwd(cwd, sizeof(cwd))) { strncpy(out, "?", outlen - 1); out[outlen - 1] = '\0'; return; }
+
+    const char *home = getenv("HOME");
+    if (home && *home) {
+        size_t hlen = strlen(home);
+        if (strncmp(cwd, home, hlen) == 0) {
+            const char *rest = cwd + hlen;
+            if (!*rest) {
+                strncpy(out, "~", outlen - 1);
+                out[outlen - 1] = '\0';
+                return;
+            }
+            if (*rest == '/') rest++;
+            snprintf(out, outlen, "~/%s", rest);
+            return;
+        }
+    }
+
+    strncpy(out, cwd, outlen - 1);
+    out[outlen - 1] = '\0';
+#endif
 }
 
 /* Decode arrow keys and special sequences */
@@ -153,29 +231,40 @@ static int read_key(void) {
 /* Read one interactive line */
 int input_readline(char *outbuf, int maxlen) {
     char prompt[256];
+    int prompt_len = 0;
+    char cwd_display[PROMPT_PATH_MAX];
 
 #if defined(_WIN32) || defined(_WIN64)
     char user[128] = "user";
     DWORD unlen = sizeof(user);
     GetUserNameA(user, &unlen);
-
-    char cwd[MAX_PATH];
-    if (!GetCurrentDirectoryA(MAX_PATH, cwd)) strcpy(cwd, "?");
-
-    snprintf(prompt, sizeof(prompt), "[%s] %s> ", user, cwd);
+    build_display_cwd(cwd_display, sizeof(cwd_display));
 #else
     const char *user = getenv("USER");
     if (!user) user = "user";
-
-    char cwd[PATH_MAX];
-    if (!getcwd(cwd, sizeof(cwd))) strcpy(cwd, "?");
-
-    snprintf(prompt, sizeof(prompt), "[%s] %s> ", user, cwd);
+    build_display_cwd(cwd_display, sizeof(cwd_display));
 #endif
+
+    /* Prompt with colors; keep visible length for cursor placement */
+    prompt_len = (int)(2 + strlen(user) + 1 + strlen(cwd_display) + 2); /* [user] path> */
+    snprintf(prompt, sizeof(prompt),
+             "\x1b[90m[\x1b[32m%s\x1b[90m]\x1b[0m \x1b[36m%s\x1b[0m\x1b[90m>\x1b[0m ",
+             user, cwd_display);
 
     /* Print prompt ONCE */
     fputs(prompt, stdout);
     fflush(stdout);
+
+    if (use_stdio) {
+        if (maxlen <= 0) return 1;
+        if (!fgets(outbuf, maxlen, stdin)) return 1;
+        size_t n = strlen(outbuf);
+        while (n > 0 && (outbuf[n - 1] == '\n' || outbuf[n - 1] == '\r')) {
+            outbuf[n - 1] = '\0';
+            n--;
+        }
+        return 0;
+    }
 
     int len = 0;
     int cursor = 0;
@@ -201,11 +290,12 @@ int input_readline(char *outbuf, int maxlen) {
             return 0;
         }
 
-        /* Ctrl-C */
+        /* Ctrl-C: cancel current line, keep shell alive */
         if (k == 3) {
             putchar('\n');
-            outbuf[0] = '\0';
-            return -1;
+            linebuf[0] = '\0';
+            if (maxlen > 0) outbuf[0] = '\0';
+            return 0;
         }
 
         /* Backspace */
@@ -216,7 +306,7 @@ int input_readline(char *outbuf, int maxlen) {
                         len - cursor + 1);
                 cursor--;
                 len--;
-                redraw_line(prompt, linebuf, len, cursor);
+                redraw_line(prompt, prompt_len, linebuf, len, cursor);
             }
             continue;
         }
@@ -232,7 +322,7 @@ int input_readline(char *outbuf, int maxlen) {
             linebuf[MAX_INPUT - 1] = 0;
 
             len = cursor = (int)strlen(linebuf);
-            redraw_line(prompt, linebuf, len, cursor);
+            redraw_line(prompt, prompt_len, linebuf, len, cursor);
             continue;
         }
 
@@ -253,21 +343,21 @@ int input_readline(char *outbuf, int maxlen) {
                 len = cursor = (int)strlen(linebuf);
             }
 
-            redraw_line(prompt, linebuf, len, cursor);
+            redraw_line(prompt, prompt_len, linebuf, len, cursor);
             continue;
         }
 
         /* Left ← */
         if (k == 1007 && cursor > 0) {
             cursor--;
-            redraw_line(prompt, linebuf, len, cursor);
+            redraw_line(prompt, prompt_len, linebuf, len, cursor);
             continue;
         }
 
         /* Right → */
         if (k == 1006 && cursor < len) {
             cursor++;
-            redraw_line(prompt, linebuf, len, cursor);
+            redraw_line(prompt, prompt_len, linebuf, len, cursor);
             continue;
         }
 
@@ -279,7 +369,7 @@ int input_readline(char *outbuf, int maxlen) {
             linebuf[cursor] = (char)k;
             cursor++;
             len++;
-            redraw_line(prompt, linebuf, len, cursor);
+            redraw_line(prompt, prompt_len, linebuf, len, cursor);
             continue;
         }
     }

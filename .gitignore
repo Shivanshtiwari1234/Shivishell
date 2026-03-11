@@ -1,3 +1,4 @@
-shivishell.exe
+build/
 .vscode/
-build.bat
+copyf.cmd
+.idea/

@@ -7,7 +7,7 @@
 int input_init(void);
 void input_restore(void);
 
-/* Read a line into outbuf (maxlen). Returns 0 on success, -1 on Ctrl-C/EOF. */
+/* Read a line into outbuf (maxlen). Returns 0 on success or Ctrl-C (empty). */
 int input_readline(char *outbuf, int maxlen);
 
 /* Optional helpers */

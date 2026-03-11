@@ -13,6 +13,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
+#include <errno.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -171,6 +173,26 @@ static char *save_path_env(void) {
 #endif
 }
 
+#if defined(_WIN32) || defined(_WIN64)
+static volatile LONG g_child_running = 0;
+static int g_ctrl_handler_installed = 0;
+
+static BOOL WINAPI console_ctrl_handler(DWORD type) {
+    if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT) {
+        /* Ignore in the shell so the child can handle it. */
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void ensure_ctrl_handler(void) {
+    if (!g_ctrl_handler_installed) {
+        SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+        g_ctrl_handler_installed = 1;
+    }
+}
+#endif
+
 static void set_path_env(const char *value) {
 #if defined(_WIN32) || defined(_WIN64)
     _putenv_s("PATH", value ? value : "");
@@ -182,6 +204,8 @@ static void set_path_env(const char *value) {
 
 static int run_command(const char *cmdline) {
 #if defined(_WIN32) || defined(_WIN64)
+    ensure_ctrl_handler();
+
     char cmdexe[MAX_PATH];
     UINT n = GetSystemDirectoryA(cmdexe, (UINT)sizeof(cmdexe));
     if (n == 0 || n >= sizeof(cmdexe)) {
@@ -201,6 +225,7 @@ static int run_command(const char *cmdline) {
     ZeroMemory(&pi, sizeof(pi));
     si.cb = sizeof(si);
 
+    InterlockedExchange(&g_child_running, 1);
     BOOL ok = CreateProcessA(
         NULL,
         runbuf,
@@ -213,6 +238,7 @@ static int run_command(const char *cmdline) {
         &pi
     );
     if (!ok) {
+        InterlockedExchange(&g_child_running, 0);
         fprintf(stderr, "'%s' is not recognized as an internal or external command.\n", cmdline);
         return -1;
     }
@@ -222,12 +248,40 @@ static int run_command(const char *cmdline) {
     GetExitCodeProcess(pi.hProcess, &exit_code);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
+    InterlockedExchange(&g_child_running, 0);
     return (int)exit_code;
 #else
-    int rc = system(cmdline);
-    if (rc == -1) return -1;
-    if (WIFEXITED(rc)) return WEXITSTATUS(rc);
-    return rc;
+    struct sigaction oldint;
+    struct sigaction ign;
+    memset(&ign, 0, sizeof(ign));
+    ign.sa_handler = SIG_IGN;
+    sigaction(SIGINT, &ign, &oldint);
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        sigaction(SIGINT, &oldint, NULL);
+        return -1;
+    }
+    if (pid == 0) {
+        struct sigaction defint;
+        memset(&defint, 0, sizeof(defint));
+        defint.sa_handler = SIG_DFL;
+        sigaction(SIGINT, &defint, NULL);
+        execl("/bin/sh", "sh", "-c", cmdline, (char *)NULL);
+        _exit(127);
+    }
+
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno == EINTR) continue;
+        break;
+    }
+
+    sigaction(SIGINT, &oldint, NULL);
+
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return status;
 #endif
 }
 
