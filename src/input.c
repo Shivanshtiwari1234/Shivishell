@@ -140,6 +140,13 @@ static void redraw_line(const char *prompt, int prompt_len, char *buf, int len, 
     fflush(stdout);
 }
 
+static int prompt_color_enabled(void) {
+    if (use_stdio) return 0;
+    if (getenv("NO_COLOR")) return 0;
+    if (getenv("SHIVI_NO_COLOR")) return 0;
+    return 1;
+}
+
 static void to_forward_slashes(char *s) {
     for (; *s; ++s) {
         if (*s == '\\') *s = '/';
@@ -232,6 +239,7 @@ static int read_key(void) {
 int input_readline(char *outbuf, int maxlen) {
     char prompt[256];
     int prompt_len = 0;
+    int prompt_visible_len = 0;
     char cwd_display[PROMPT_PATH_MAX];
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -246,10 +254,16 @@ int input_readline(char *outbuf, int maxlen) {
 #endif
 
     /* Prompt with colors; keep visible length for cursor placement */
-    prompt_len = (int)(2 + strlen(user) + 1 + strlen(cwd_display) + 2); /* [user] path> */
-    snprintf(prompt, sizeof(prompt),
-             "\x1b[90m[\x1b[32m%s\x1b[90m]\x1b[0m \x1b[36m%s\x1b[0m\x1b[90m>\x1b[0m ",
-             user, cwd_display);
+    prompt_visible_len = (int)(strlen(user) + strlen(cwd_display) + 5); /* [user] path> (plus trailing space) */
+    if (prompt_color_enabled()) {
+        snprintf(prompt, sizeof(prompt),
+                 "\x1b[90m[\x1b[32m%s\x1b[90m]\x1b[0m \x1b[36m%s\x1b[0m\x1b[90m>\x1b[0m ",
+                 user, cwd_display);
+        prompt_len = prompt_visible_len;
+    } else {
+        snprintf(prompt, sizeof(prompt), "[%s] %s> ", user, cwd_display);
+        prompt_len = (int)strlen(prompt);
+    }
 
     /* Print prompt ONCE */
     fputs(prompt, stdout);
