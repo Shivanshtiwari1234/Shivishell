@@ -2,14 +2,38 @@
 #include <string.h>
 #include <stdlib.h>
 
+#if defined(_WIN32) || defined(_WIN64)
+  #define WIN32_LEAN_AND_MEAN
+  #include <windows.h>
+#else
+  #include <unistd.h>
+#endif
+
 #include "input.h"
 #include "parse.h"
 #include "exec.h"
 #include "history.h"
 
+static void start_in_home_dir(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    const char *home = getenv("USERPROFILE");
+    if (!home || !*home) home = getenv("HOME");
+    if (home && *home) {
+        SetCurrentDirectoryA(home);
+    }
+#else
+    const char *home = getenv("HOME");
+    if (home && *home) {
+        chdir(home);
+    }
+#endif
+}
+
 int main(void) {
     char line[MAX_INPUT];
     char *segments[MAX_SEGMENTS];
+
+    start_in_home_dir();
 
     if (input_init() != 0) {
         fprintf(stderr, "Failed to initialize input subsystem\n");

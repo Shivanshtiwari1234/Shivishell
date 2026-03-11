@@ -54,15 +54,18 @@ If a command is missing, the shell reports `command not available`.
 **Prompt**
 The prompt is rendered as:
 ```
-[username] current/working/directory>
+[username] current/working/directory
+>
 ```
 Example:
 ```
-[Shiva] C:/Users/Shiva/OneDrive/Desktop>
+[Shiva] ~/OneDrive/Desktop
+>
 ```
 
 **Notes**
 - Pipelines are joined and executed using the system shell (`cmd.exe /C` on Windows, `/bin/sh -c` on POSIX).
 - Ctrl+C cancels the current line without exiting the shell.
 - Type `exit` to quit.
- - macOS uses `_NSGetExecutablePath` to locate the `commands` directory next to the executable.
+- macOS uses `_NSGetExecutablePath` to locate the `commands` directory next to the executable.
+- Set `NO_COLOR` or `SHIVI_NO_COLOR` to disable prompt colors.

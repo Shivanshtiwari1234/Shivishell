@@ -5,9 +5,6 @@ const path = require("path");
 const root = __dirname;
 const buildDir = path.join(root, "build");
 const srcDir = path.join(root, "src");
-const includeDir = path.join(root, "include");
-const testsDir = path.join(root, "tests");
-
 if (!fs.existsSync(buildDir)) {
   fs.mkdirSync(buildDir, { recursive: true });
 }

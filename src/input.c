@@ -73,10 +73,10 @@ int input_init(void) {
     mIn |=  ENABLE_WINDOW_INPUT | ENABLE_VIRTUAL_TERMINAL_INPUT;
     SetConsoleMode(g_hIn, mIn);
 
-    /* Hide cursor */
+    /* Keep cursor visible for readability */
     if (GetConsoleCursorInfo(g_hOut, &g_oldCursorInfo)) {
         CONSOLE_CURSOR_INFO ci = g_oldCursorInfo;
-        ci.bVisible = FALSE;
+        ci.bVisible = TRUE;
         SetConsoleCursorInfo(g_hOut, &ci);
     }
 #else
@@ -95,7 +95,7 @@ int input_init(void) {
     t.c_cc[VTIME] = 0;
 
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &t);
-    fputs("\x1b[?25l", stdout); fflush(stdout);
+    fputs("\x1b[?25h", stdout); fflush(stdout);
 #endif
 
     inited = 1;
@@ -145,6 +145,26 @@ static int prompt_color_enabled(void) {
     if (getenv("NO_COLOR")) return 0;
     if (getenv("SHIVI_NO_COLOR")) return 0;
     return 1;
+}
+
+static void build_prompt(char *out, size_t outlen, const char *user, const char *cwd_display, int *visible_len) {
+    /* Visible prompt length is only the final input line: "> " */
+    if (visible_len) *visible_len = 2;
+
+    if (!out || outlen == 0) return;
+    if (!user) user = "user";
+    if (!cwd_display) cwd_display = "?";
+
+    if (prompt_color_enabled()) {
+        const char *c_dim = "\x1b[90m";
+        const char *c_user = "\x1b[32m";
+        const char *c_path = "\x1b[36m";
+        const char *c_rst = "\x1b[0m";
+        snprintf(out, outlen, "%s[%s%s%s] %s%s%s\n%s>%s ",
+                 c_dim, c_user, user, c_dim, c_path, cwd_display, c_rst, c_dim, c_rst);
+    } else {
+        snprintf(out, outlen, "[%s] %s\n> ", user, cwd_display);
+    }
 }
 
 static void to_forward_slashes(char *s) {
@@ -253,17 +273,9 @@ int input_readline(char *outbuf, int maxlen) {
     build_display_cwd(cwd_display, sizeof(cwd_display));
 #endif
 
-    /* Prompt with colors; keep visible length for cursor placement */
-    prompt_visible_len = (int)(strlen(user) + strlen(cwd_display) + 5); /* [user] path> (plus trailing space) */
-    if (prompt_color_enabled()) {
-        snprintf(prompt, sizeof(prompt),
-                 "\x1b[90m[\x1b[32m%s\x1b[90m]\x1b[0m \x1b[36m%s\x1b[0m\x1b[90m>\x1b[0m ",
-                 user, cwd_display);
-        prompt_len = prompt_visible_len;
-    } else {
-        snprintf(prompt, sizeof(prompt), "[%s] %s> ", user, cwd_display);
-        prompt_len = (int)strlen(prompt);
-    }
+    /* Prompt with colors; keep visible length for cursor placement (last line only) */
+    build_prompt(prompt, sizeof(prompt), user, cwd_display, &prompt_visible_len);
+    prompt_len = prompt_visible_len;
 
     /* Print prompt ONCE */
     fputs(prompt, stdout);
