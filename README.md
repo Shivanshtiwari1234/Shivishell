@@ -16,9 +16,30 @@ Windows:
 build.bat
 ```
 
-Linux/macOS:
+Linux/macOS (uses `cc`, which maps to `gcc` or `clang`):
 ```bash
 ./build.sh
+```
+
+Makefile (Linux/macOS):
+```bash
+make
+```
+
+**Tests**
+Windows:
+```bat
+test.bat
+```
+
+Linux/macOS:
+```bash
+./test.sh
+```
+
+Makefile:
+```bash
+make test
 ```
 
 **Run**
@@ -46,3 +67,4 @@ Example:
 - Pipelines are joined and executed using the system shell (`cmd.exe /C` on Windows, `/bin/sh -c` on POSIX).
 - Ctrl+C cancels the current line without exiting the shell.
 - Type `exit` to quit.
+ - macOS uses `_NSGetExecutablePath` to locate the `commands` directory next to the executable.

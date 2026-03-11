@@ -14,10 +14,14 @@
 #include <windows.h>
 #else
 #include <errno.h>
+#include <limits.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 #endif
 
 #ifndef PATH_MAX
@@ -87,6 +91,21 @@ static int get_exe_dir(char *out, size_t outlen) {
     if (!last) return -1;
     *last = '\0';
 #else
+#if defined(__APPLE__)
+    uint32_t size = (uint32_t)outlen;
+    if (_NSGetExecutablePath(out, &size) == 0) {
+        char resolved[PATH_MAX];
+        const char *p = out;
+        if (realpath(out, resolved)) p = resolved;
+        char *last = strrchr(p, '/');
+        if (!last) return -1;
+        size_t dirlen = (size_t)(last - p);
+        if (dirlen >= outlen) return -1;
+        memcpy(out, p, dirlen);
+        out[dirlen] = '\0';
+        return 0;
+    }
+#else
     ssize_t n = readlink("/proc/self/exe", out, outlen - 1);
     if (n > 0 && n < (ssize_t)outlen) {
         out[n] = '\0';
@@ -95,6 +114,7 @@ static int get_exe_dir(char *out, size_t outlen) {
         *last = '\0';
         return 0;
     }
+#endif
     if (!getcwd(out, outlen)) return -1;
 #endif
     return 0;
